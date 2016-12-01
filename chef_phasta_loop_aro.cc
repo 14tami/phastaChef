@@ -268,6 +268,39 @@ namespace {
 
 } //end namespace
 
+// six degree of freedom
+struct sixdof {
+  double x;
+  double v;
+  double a;
+  double m;
+};
+
+static struct sixdof projectile;
+
+void initialize_projectile_motion () {
+	projectile.m = 15.;
+	projectile.x = 0.;
+	projectile.v = 0.;
+	projectile.a = 0.;
+}
+
+#ifdef __cplusplus
+extern"C"{
+#endif
+void update_model_motion_using_force (double fx, double fy, double fz, double dt) {
+  projectile.a = fx/projectile.m;
+  projectile.v += projectile.a * dt;
+  projectile.x += projectile.v * dt;
+}
+
+void get_model_velocity (double v) {
+  v = projectile.v;
+}
+#ifdef __cplusplus
+}
+#endif
+
 int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
   PCU_Comm_Init();
@@ -302,13 +335,16 @@ int main(int argc, char** argv) {
   /* load input file for solver */
   phSolver::Input inp("solver.inp", "input.config");
   int step = 0; int phtStep = 0; int seq  = 0;
+  
+  // initialize projectile motion
+  initialize_projectile_motion();
+  
   writeSequence(m,seq,"test_"); seq++;
   do {
     m->verify();
     /* take the initial mesh as size field */
     apf::Field* isoSF = samSz::isoSize(m);
-    apf::Field* szFld = multipleSF(m, isoSF, 2.0);
-//    apf::Field* szFld = multipleSF(m, isoSF, 0.5);
+    apf::Field* szFld = multipleSF(m, isoSF, 1.0);
     step = phasta(inp,grs,rs);
     ctrl.rs = rs; 
     clearGRStream(grs);
