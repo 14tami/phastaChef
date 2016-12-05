@@ -1,3 +1,4 @@
+#include "customSF.h"
 #include "chefPhasta.h"
 #include "samSz.h"
 #include <PCU.h>
@@ -25,39 +26,67 @@
 #define WRITE_VTK
 #endif
 
+typedef class MVertexMove *pMVertexMove;
+extern pMVertexMove MVertexMove_new(pUnstructuredMesh dmesh, int useStrategy);
+extern void MVertexMove_setFromLocationFile(pMVertexMove, const char *file);
+extern int MVertexMove_run(pMVertexMove);
+extern void MVertexMove_delete(pMVertexMove);
+
 namespace {
   void freeMesh(apf::Mesh* m) {
     m->destroyNative();
     apf::destroyMesh(m);
   }
 
-  static apf::Field* getSprSF(apf::Mesh2* m) {
-    const int order = 2;
-    double adaptRatio = 0.1;
-//    apf::Field* szFld;
-    apf::Field* temperature = chef::extractField(m,"solution","temperature",5,apf::SCALAR);
-    assert(temperature);
-    apf::Field* eps = spr::getGradIPField(temperature, "eps", order);
-//    apf::Field* test = apf::createFieldOn(m, "TEST", apf::SCALAR);
-//    apf::zeroField(test);
-//    apf::Field* eps_star = spr::recoverField(eps);
-    apf::writeVtkFiles("test_eps",m);
-    apf::destroyField(temperature);
-    apf::Field* szFld = spr::getSPRSizeField(eps,adaptRatio);
-    apf::destroyField(eps);
-    return szFld;
-  }
+  apf::Field* refineProjSF(apf::Mesh2* m, apf::Field* orgSF, int step) {
+    /* define geom of projectile */
+    double orgCenter = 0.435;
+    double acc = 60000.0;
+    double dt = 0.00001;
+    double curCenter = orgCenter + 0.5*acc*(step-1.0)*(step-1.0)*dt*dt;
 
-  apf::Field* multipleSF(apf::Mesh* m, apf::Field* sf, double factor) {
-    apf::Field* sz = createFieldOn(m, "multipliedSize", apf::SCALAR);
+    /* define imaginary cylinder and refine size */
+    double box[] = {0.85, 0.0, 0.0, 0.87, 0.08};
+    double ref = 0.008;
+    double cor = 0.012;
+
+    /* define size field based on current center */
+    apf::Field* newSz = apf::createFieldOn(m,"refineProjSF",apf::SCALAR);
+    apf::Vector3 points;
+    double h = 0.0;
+    double f = 0.0;
     apf::MeshEntity* vtx;
     apf::MeshIterator* itr = m->begin(0);
     while( (vtx = m->iterate(itr)) ) {
-      double h = apf::getScalar(sf,vtx,0);
-      apf::setScalar(sz,vtx,0,h*factor);
+      m->getPoint(vtx, 0, points);
+      if ( fabs(points[0]- box[0]) < box[3] &&
+           sqrt((points[1]-box[1])*(points[1]-box[1]) +
+                (points[2]-box[2])*(points[2]-box[2])) < box[4]){
+        if ( fabs(points[0]- curCenter) <= 0.235 ) // near proj
+        {
+          h = ref;
+        }
+        else if( points[0]- curCenter < -0.235 ) // rear part
+        {
+          f = ((curCenter-0.235)-points[0])/(curCenter-0.235+0.02);
+          h = ref * (1-f) + cor * f;
+        }
+        else if( points[0]- curCenter >  0.235)  // front part
+        {
+          f = (points[0]-(curCenter+0.235))/(1.72-(curCenter+0.235));
+          h = ref * (1-f) + cor * f;
+        }
+        else
+          printf("surprise! we should not fall into here\n");
+      }
+      else {
+        h = apf::getScalar(orgSF,vtx,0);
+        if (h < cor) h = cor;
+      }
+      apf::setScalar(newSz,vtx,0,h);
     }
     m->end(itr);
-    return sz; 
+    return newSz;
   }
 
   static FILE* openstream_read(ph::Input& in, const char* path) {
@@ -89,10 +118,11 @@ namespace {
       }
       ctrl.adaptStrategy = 1; //error field adapt
       ctrl.adaptFlag = 1;
+      ctrl.writeGeomBCFiles = 0;
     }
   }
   
-  bool overwriteMeshCoord(apf::Mesh2* m) { 
+  bool overwriteAPFCoord(apf::Mesh2* m) {
     apf::Field* f = m->findField("motion_coords");
     assert(f);
     double* vals = new double[apf::countComponents(f)];
@@ -110,23 +140,61 @@ namespace {
     return true;  
   }
 
-  bool isMeshqGood(apf::Mesh* m, double crtn) { 
+  bool overwriteSIMCoord(apf::Mesh2* m) {
+    apf::MeshSIM* apf_msim = dynamic_cast<apf::MeshSIM*>(m);
+    pParMesh ppm = apf_msim->getMesh();
+    pMesh pm = PM_mesh(ppm,0);
+
+    M_write(pm, "before_overwrite.sms", 0, NULL);
+
+    VIter vi = M_vertexIter(pm);
+    const char* filename = "temp_sim_coord";
+    double* loc = new double[3];
+    FILE* fp = fopen (filename, "w");
+    while (pVertex v = VIter_next(vi)) {
+      V_coord(v, loc);
+      fprintf(fp, "%.16lg %.16lg %.16lg\n", loc[0], loc[1], loc[2]);
+    }
+    VIter_delete(vi);
+    fclose (fp);
+
+    pMVertexMove vmove = MVertexMove_new(pm, 0);
+    MVertexMove_setFromLocationFile(vmove, filename);
+    MVertexMove_run(vmove); // This will do the actual work
+    MVertexMove_delete(vmove);
+    return true;
+  }
+
+  void overwriteMeshCoord(ph::Input& in, apf::Mesh2* m) {
+    bool done = false;
+    if (in.simmetrixMesh)
+      done = overwriteSIMCoord(m);
+    else
+      done = overwriteAPFCoord(m);
+    assert(done);
+  }
+
+  int isMeshqGood(apf::Mesh* m, double crtn) {
     apf::Field* meshq = m->findField("meshQ");
     if (!meshq) {
-      fprintf(stderr, "Not find meshQ field.");
-      return true;  
+      if (!PCU_Comm_Self())
+        fprintf(stderr, "Not find meshQ field.\n");
+      assert(meshq);
     }
-    apf::MeshEntity* elm; 
+    int meshGood = 1;
+    apf::MeshEntity* elm;
     apf::MeshIterator* itr = m->begin(m->getDimension());
     while( (elm = m->iterate(itr)) ) {
       if (apf::getScalar(meshq, elm, 0) < crtn) {
-        apf::destroyField(meshq);
-        return false; 
-      } 
+        meshGood = 0;
+        break;
+      }
     }
     m->end(itr);
-    apf::destroyField(meshq);
-    return true; 
+    PCU_Barrier();
+    if (PCU_Min_Int(meshGood) && !PCU_Comm_Self())
+      printf("Mesh is Good. No need for adaptation!\n");
+    return PCU_Min_Int(meshGood);
   }
   
   void writeSequence (apf::Mesh2* m, int step, const char* filename) {
@@ -201,16 +269,22 @@ namespace {
     fclose (sFile);
   } 
 
-  void runMeshAdapter(ph::Input& in, apf::Mesh2*& m, apf::Field*& szFld) {
+  void runMeshAdapter(ph::Input& in, apf::Mesh2*& m, apf::Field*& orgSF, int step) {
     if (m->findField("material_type"))
       apf::destroyField(m->findField("material_type"));
     if (m->findField("meshQ"))
       apf::destroyField(m->findField("meshQ"));
+    in.writeGeomBCFiles = 1; //write GeomBC file for visualization
 
     /* Or obtain size field based on a certain field
        use temperature field for spr error estimation */
 //      apf::Field* szFld = getSprSF(m);
- 
+
+    /* prescribe the size field for projectile case */
+    apf::Field* szFld = refineProjSF(m, orgSF, step); 
+
+    writeSequence(m,step,"for_szFld_"); //for debugging
+
     if(in.simmetrixMesh == 1) {
       apf::MeshSIM* sim_m = dynamic_cast<apf::MeshSIM*>(m);
       pParMesh sim_pm = sim_m->getMesh();
@@ -247,6 +321,8 @@ namespace {
       /* set fields to be mapped */
       MSA_setMapFields(adapter, sim_fld_lst);
       PList_delete(sim_fld_lst);
+
+      PM_write(sim_pm, "before_adapt.sms", sthreadNone, NULL);
 
       /* run the adapter */
       pProgress progress = Progress_new();
@@ -346,8 +422,7 @@ int main(int argc, char** argv) {
   do {
     m->verify();
     /* take the initial mesh as size field */
-    apf::Field* isoSF = samSz::isoSize(m);
-    apf::Field* szFld = multipleSF(m, isoSF, 1.0);
+    apf::Field* szFld = samSz::isoSize(m);
     step = phasta(inp,grs,rs);
     ctrl.rs = rs; 
     clearGRStream(grs);
@@ -356,27 +431,22 @@ int main(int argc, char** argv) {
     if( step >= maxStep )
       break;
     setupChef(ctrl,step);
-//    bool doAdaptation = !isMeshqGood(m, ctrl.meshqCrtn);
-// make the adaptaion run anyway
-//    doAdaptation = false;
-    bool doAdaptation = true;
-// delele above when finish debug
+    chef::readAndAttachFields(ctrl,m);
+    overwriteMeshCoord(ctrl,m);
+//    int doAdaptation = !isMeshqGood(m, ctrl.meshqCrtn);
+    int doAdaptation = 1; // make it run anyway
+
     m->verify();
-    writePHTfiles(phtStep, step-phtStep, PCU_Comm_Peers()); phtStep = step; 
     if ( doAdaptation ) {
-      chef::readAndAttachFields(ctrl,m);
-      overwriteMeshCoord(m);
-      m->verify();
+      writePHTfiles(phtStep, step-phtStep, PCU_Comm_Peers()); phtStep = step;
       writeSequence(m,seq,"test_"); seq++;
       /* do mesh adaptation */ 
-      runMeshAdapter(ctrl,m,szFld);
-      writeSequence(m,seq,"test_"); seq++;
+      runMeshAdapter(ctrl,m,szFld,step);
       m->verify(); 
       chef::balance(ctrl,m);
+      writeSequence(m,seq,"test_"); seq++;
     }
     chef::preprocess(m,ctrl,grs);
-    if ( doAdaptation )
-      writeSequence(m,seq,"test_"); seq++;
     clearRStream(rs);
   } while( step < maxStep );
   destroyGRStream(grs);
