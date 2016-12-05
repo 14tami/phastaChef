@@ -292,10 +292,13 @@ void update_model_motion_using_force (double fx, double fy, double fz, double dt
   projectile.a = fx/projectile.m;
   projectile.v += projectile.a * dt;
   projectile.x += projectile.v * dt;
+
+  printf("update a,v,x = %lf, %lf, %lf\n", projectile.a, projectile.v, projectile.x);
 }
 
-void get_model_velocity (double v) {
-  v = projectile.v;
+void get_model_velocity (double *v) {
+  *v = projectile.v;
+  printf("get a,v,x = %lf, %lf, %lf\n", projectile.a, projectile.v, projectile.x);
 }
 #ifdef __cplusplus
 }
