@@ -32,23 +32,42 @@ extern void MVertexMove_setFromLocationFile(pMVertexMove, const char *file);
 extern int MVertexMove_run(pMVertexMove);
 extern void MVertexMove_delete(pMVertexMove);
 
+// six degree of freedom
+struct sixdof {
+  double x;
+  double v;
+  double a;
+  double m;
+};
+
+static struct sixdof projectile;
+
 namespace {
   void freeMesh(apf::Mesh* m) {
     m->destroyNative();
     apf::destroyMesh(m);
   }
 
+void initialize_projectile_motion () {
+	projectile.m = 15.;
+	projectile.x = 0.39;
+	projectile.v = 0.;
+	projectile.a = 0.;
+}
+
   apf::Field* refineProjSF(apf::Mesh2* m, apf::Field* orgSF, int step) {
     /* define geom of projectile */
-    double orgCenter = 0.435;
-    double acc = 60000.0;
-    double dt = 0.00001;
-    double curCenter = orgCenter + 0.5*acc*(step-1.0)*(step-1.0)*dt*dt;
+    double curCenter = projectile.x;
+
+    printf("curCenter,%lf",curCenter);
 
     /* define imaginary cylinder and refine size */
-    double box[] = {0.85, 0.0, 0.0, 0.87, 0.08};
-    double ref = 0.008;
-    double cor = 0.012;
+    double box[] = {0.85, 0.0, 0.0, 0.855, 0.065};
+    double len = 0.21;
+    double size1 = 0.003;  // around projectile
+    double size2 = 0.01;  // left side of barrel
+    double size3 = 0.01;   // rigtt side of barrel
+    double size4 = 0.1;   // outside of barrel
 
     /* define size field based on current center */
     apf::Field* newSz = apf::createFieldOn(m,"refineProjSF",apf::SCALAR);
@@ -62,26 +81,26 @@ namespace {
       if ( fabs(points[0]- box[0]) < box[3] &&
            sqrt((points[1]-box[1])*(points[1]-box[1]) +
                 (points[2]-box[2])*(points[2]-box[2])) < box[4]){
-        if ( fabs(points[0]- curCenter) <= 0.235 ) // near proj
+        if ( fabs(points[0]- curCenter) <= len ) // near proj
         {
-          h = ref;
+          h = size1;
         }
-        else if( points[0]- curCenter < -0.235 ) // rear part
+        else if( points[0]- curCenter < -len+0.01 ) // rear part
         {
-          f = ((curCenter-0.235)-points[0])/(curCenter-0.235+0.02);
-          h = ref * (1-f) + cor * f;
+          f = (curCenter-len-points[0])/(curCenter-len+0.005);
+          h = size1 * (1-f) + size2 * f;
         }
-        else if( points[0]- curCenter >  0.235)  // front part
+        else if( points[0]- curCenter >  len-0.01)  // front part
         {
-          f = (points[0]-(curCenter+0.235))/(1.72-(curCenter+0.235));
-          h = ref * (1-f) + cor * f;
+          f = (points[0]-(curCenter + len))/(1.705-(curCenter + len));
+          h = size1 * (1-f) + size3 * f;
         }
         else
           printf("surprise! we should not fall into here\n");
       }
       else {
         h = apf::getScalar(orgSF,vtx,0);
-        if (h < cor) h = cor;
+        if (h < size4) h = size4;
       }
       apf::setScalar(newSz,vtx,0,h);
     }
@@ -343,23 +362,6 @@ namespace {
   }
 
 } //end namespace
-
-// six degree of freedom
-struct sixdof {
-  double x;
-  double v;
-  double a;
-  double m;
-};
-
-static struct sixdof projectile;
-
-void initialize_projectile_motion () {
-	projectile.m = 15.;
-	projectile.x = 0.;
-	projectile.v = 0.;
-	projectile.a = 0.;
-}
 
 #ifdef __cplusplus
 extern"C"{
