@@ -12,6 +12,24 @@
 #include <phastaChef.h>
 
 namespace pc {
+  double getShortestEdgeLength(apf::Mesh* m, apf::MeshEntity* elm) {
+    int useFirFlag = 1;
+    double min = 0.0;
+    apf::Downward edges;
+    int nd = m->getDownward(elm, 1, edges);
+    for (int i=0; i < nd; ++i) {
+      double el = apf::measure(m,edges[i]);
+      if (useFirFlag) {
+        min = el;
+        useFirFlag = 0;
+      }
+      else {
+        if (el < min) min = el;
+      }
+    }
+    return min;
+  }
+
   void attachVMSSizeFieldH1(apf::Mesh2*& m, ph::Input& in) {
     //read phasta element-based field VMS_error
     apf::Field* err = m->findField("VMS_error");
@@ -39,8 +57,12 @@ namespace pc {
       //get shortest height of this element
       if (nsd == 2)
         h_old = sqrt(apf::measure(me) * 4 / sqrt(3));
-      else
-        h_old = apf::computeShortestHeightInTet(m,elm);
+      else {
+        if (m->getType(elm) == apf::Mesh::TET)
+          h_old = apf::computeShortestHeightInTet(m,elm);
+        else
+          h_old = pc::getShortestEdgeLength(m,elm);
+      }
       //get error
       apf::getComponents(err, elm, 0, &curr_err[0]);
       //get new size
@@ -97,7 +119,23 @@ namespace pc {
     apf::destroyField(elm_size);
   }
 
-  void attachVMSSizeField(apf::Mesh2*& m, ph::Input& in) {
+  void attachVMSSizeField(apf::Mesh2*& m, ph::Input& in, phSolver::Input& inp) {
+    // make sure we have VMS error field and newly-created size field
+    assert(m->findField("VMS_error"));
+    assert(m->findField("sizes"));
+    // make sure that the desired error is less than the triggered error
+    // Otherwise, it will keep triggering mesh adaptation
+    if((string)inp.GetValue("Error Trigger Equation Option") != "Mass")
+      assert( in.simAdaptDesiredErrorMass < (double)inp.GetValue("Error Threshold for Mass Equation"));
+    else if ((string)inp.GetValue("Error Trigger Equation Option") != "Mass")
+      assert( in.simAdaptDesiredErrorMomt < (double)inp.GetValue("Error Threshold for Momentum Equation"));
+    else if ((string)inp.GetValue("Error Trigger Equation Option") != "Mass")
+      assert( in.simAdaptDesiredErrorEnrg < (double)inp.GetValue("Error Threshold for Energy Equation"));
+    else if ((string)inp.GetValue("Error Trigger Equation Option") != "Mass") {
+      assert( in.simAdaptDesiredErrorMass < (double)inp.GetValue("Error Threshold for Mass Equation"));
+      assert( in.simAdaptDesiredErrorMomt < (double)inp.GetValue("Error Threshold for Momentum Equation"));
+      assert( in.simAdaptDesiredErrorEnrg < (double)inp.GetValue("Error Threshold for Energy Equation"));
+    }
     attachVMSSizeFieldH1(m, in);
   }
 }

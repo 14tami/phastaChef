@@ -167,7 +167,7 @@ int serialGradation(apf::Mesh* m, std::queue<apf::MeshEntity*> &markedEdges,doub
   return needsParallel;
 }
 
-void addSmootherInMover(apf::Mesh2* m, double gradingFactor) {
+void addSmoother(apf::Mesh2* m, double gradingFactor) {
   meshGradation(m, gradingFactor);
 }
 

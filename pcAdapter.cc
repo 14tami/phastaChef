@@ -154,14 +154,14 @@ namespace pc {
     MSA_setExposedBLBehavior(adapter,BL_DisallowExposed);
     MSA_setBLSnapping(adapter, 0); // currently needed for parametric model
     MSA_setBLMinLayerAspectRatio(adapter, 0.0); // needed in parallel
-//    MSA_setSizeGradation(adapter, 1, 0.66667); // set mesh gradation
 
 // create a field to store mesh size
     if(m->findField("sizes")) apf::destroyField(m->findField("sizes"));
     apf::Field* sizes = apf::createSIMFieldOn(m, "sizes", apf::VECTOR);
+    phSolver::Input inp("solver.inp", "input.config");
 // switch between VMS error mesh size and initial mesh size
-    if(m->findField("VMS_error")) {
-      pc::attachVMSSizeField(m, in);
+    if((string)inp.GetValue("Error Estimation Option") != "False") {
+      pc::attachVMSSizeField(m, in, inp);
     }
     else {
       if(m->findField("frames")) apf::destroyField(m->findField("frames"));
@@ -174,7 +174,7 @@ namespace pc {
 //      pc::prescribe_proj_mesh_size(model, pm, m, sizes, in.rbParamData[0]);
 
 // add mesh smooth/gradation function here
-//      pc::addSmootherInMover(m, in.gradingFactor);
+    pc::addSmoother(m, in.gradingFactor);
 
     /* use current size field */
     if(!PCU_Comm_Self())
