@@ -171,7 +171,7 @@ namespace pc {
 
 // prescribe mesh size field for the projectile case
 // this is hardcoded, please comment out this call for other usage
-//      pc::prescribe_proj_mesh_size(model, pm, m, sizes, in.rbParamData[0]);
+    pc::prescribe_proj_mesh_size(model, pm, m, sizes, in.rbParamData[0]);
 
 // add mesh smooth/gradation function here
     pc::addSmoother(m, in.gradingFactor);
