@@ -598,6 +598,9 @@ if (pm) {
     pPList sim_fld_lst = PList_new();
     PList_clear(sim_fld_lst);
     if (cooperation) {
+      // attach mesh size field
+      pc::attachMeshSizeField(m, in);
+
       if (in.solutionMigration)
         sim_fld_lst = getSimFieldList(in, m);
       addImproverInMover(mmover, sim_fld_lst);
@@ -613,10 +616,12 @@ if (pm) {
     assert(isRunMover);
     MeshMover_delete(mmover);
 
-
     if (cooperation) {
       // load balance
       balanceEqualWeights(ppm, progress);
+
+      // write out mesh quality statistic info
+      pc::measureIsoMeshAndWrite(m, in);
 
       // transfer sim fields to apf fields
       if (in.solutionMigration)
