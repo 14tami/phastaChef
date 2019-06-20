@@ -8,6 +8,7 @@
 #include <SimDiscrete.h>
 #include "SimMeshMove.h"
 #include "SimMeshTools.h"
+#include <SimAdvMeshing.h>
 #include "apfSIM.h"
 #include "gmi_sim.h"
 #include <PCU.h>
@@ -15,6 +16,7 @@
 #include <phastaChef.h>
 #include <maStats.h>
 #include <apfShape.h>
+#include <math.h>
 
 extern void MSA_setBLSnapping(pMSAdapt, int onoff);
 
@@ -59,22 +61,6 @@ namespace pc {
     return outf;
   }
 
-  void meshSizeClamp(apf::Mesh2*& m, ph::Input& in, apf::Field* sizes) {
-    assert(sizes);
-    apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
-    apf::MeshEntity* v;
-    apf::MeshIterator* vit = m->begin(0);
-    while ((v = m->iterate(vit))) {
-      apf::getVector(sizes,v,0,v_mag);
-      for (int i = 0; i < 3; i++) {
-        if(v_mag[i] < in.simSizeLowerBound) v_mag[i] = in.simSizeLowerBound;
-        if(v_mag[i] > in.simSizeUpperBound) v_mag[i] = in.simSizeUpperBound;
-      }
-      apf::setVector(sizes,v,0,v_mag);
-    }
-    m->end(vit);
-  }
-
   void attachMeshSizeField(apf::Mesh2*& m, ph::Input& in) {
     /* create a field to store mesh size */
     if(m->findField("sizes")) apf::destroyField(m->findField("sizes"));
@@ -96,8 +82,6 @@ namespace pc {
 
     /* add mesh smooth/gradation function here */
     pc::addSmoother(m, in.gradingFactor);
-    /* limit mesh size in a range */
-    pc::meshSizeClamp(m, in, sizes);
   }
 
   int getNumOfMappedFields(phSolver::Input& inp) {
@@ -254,6 +238,63 @@ namespace pc {
     if(m->findField("frames")) apf::destroyField(m->findField("frames"));
   }
 
+  int estimateAdaptedMeshElements(apf::Mesh2*& m, apf::Field* sizes) {
+    double estElm = 0.0;
+    apf::Vector3 v_mag = apf::Vector3(0.0, 0.0, 0.0);;
+    int num_dims = m->getDimension();
+    assert(num_dims == 3); // only work for 3D mesh
+    apf::Vector3 xi = apf::Vector3(0.25, 0.25, 0);
+    apf::MeshEntity* en;
+    apf::MeshIterator* eit = m->begin(num_dims);
+    while ((en = m->iterate(eit))) {
+      apf::MeshElement* elm = apf::createMeshElement(m,en);
+      apf::Element* fd_elm = apf::createElement(sizes,elm);
+      apf::getVector(fd_elm,xi,v_mag);
+      double h_old = apf::computeShortestHeightInTet(m,en);
+      if(EN_isBLEntity(reinterpret_cast<pEntity>(en))) {
+        estElm = estElm + (h_old/v_mag[0])*(h_old/v_mag[0]);
+      }
+      else {
+        estElm = estElm + (h_old/v_mag[0])*(h_old/v_mag[0])*(h_old/v_mag[0]);
+      }
+    }
+    m->end(eit);
+    return (int)estElm;
+  }
+
+  void scaleDownNumberElements(ph::Input& in, apf::Mesh2*& m, apf::Field* sizes) {
+    int N_est = estimateAdaptedMeshElements(m, sizes);
+    if(!PCU_Comm_Self())
+      printf("Estimated No. of Elm: %d\n", N_est);
+    double f = (double)N_est / (double)in.simMaxAdaptMeshElements;
+    if (f > 1.0) {
+      apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
+      apf::MeshEntity* v;
+      apf::MeshIterator* vit = m->begin(0);
+      while ((v = m->iterate(vit))) {
+        apf::getVector(sizes,v,0,v_mag);
+        for (int i = 0; i < 3; i++) v_mag[i] = v_mag[i] * cbrt(f);
+        apf::setVector(sizes,v,0,v_mag);
+      }
+      m->end(vit);
+    }
+  }
+
+  void meshSizeClamp(ph::Input& in, apf::Mesh2*& m, apf::Field* sizes) {
+    apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
+    apf::MeshEntity* v;
+    apf::MeshIterator* vit = m->begin(0);
+    while ((v = m->iterate(vit))) {
+      apf::getVector(sizes,v,0,v_mag);
+      for (int i = 0; i < 3; i++) {
+        if(v_mag[i] < in.simSizeLowerBound) v_mag[i] = in.simSizeLowerBound;
+        if(v_mag[i] > in.simSizeUpperBound) v_mag[i] = in.simSizeUpperBound;
+      }
+      apf::setVector(sizes,v,0,v_mag);
+    }
+    m->end(vit);
+  }
+
   void setupSimImprover(pVolumeMeshImprover vmi, pPList sim_fld_lst) {
     VolumeMeshImprover_setModifyBL(vmi, 1);
     VolumeMeshImprover_setShapeMetric(vmi, ShapeMetricType_VolLenRatio, 0.3);
@@ -270,12 +311,18 @@ namespace pc {
     MSA_setBLSnapping(adapter, 0); // currently needed for parametric model
     MSA_setBLMinLayerAspectRatio(adapter, 0.0); // needed in parallel
 
+    apf::Field* sizes = m->findField("sizes_sim");
+    assert(sizes);
+    /* scale mesh if number of elements exceeds threshold */
+    pc::scaleDownNumberElements(in, m, sizes);
+
+    /* limit mesh size in a range */
+    pc::meshSizeClamp(in, m, sizes);
+
     /* use current size field */
     if(!PCU_Comm_Self())
       printf("Start mesh adapt of setting size field\n");
 
-    apf::Field* sizes = m->findField("sizes_sim");
-    assert(sizes);
     apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
     apf::MeshEntity* v;
     apf::MeshIterator* vit = m->begin(0);
