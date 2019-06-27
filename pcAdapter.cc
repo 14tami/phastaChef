@@ -8,6 +8,7 @@
 #include <SimDiscrete.h>
 #include "SimMeshMove.h"
 #include "SimMeshTools.h"
+#include <SimAdvMeshing.h>
 #include "apfSIM.h"
 #include "gmi_sim.h"
 #include <PCU.h>
@@ -15,6 +16,7 @@
 #include <phastaChef.h>
 #include <maStats.h>
 #include <apfShape.h>
+#include <math.h>
 
 extern void MSA_setBLSnapping(pMSAdapt, int onoff);
 
@@ -59,22 +61,6 @@ namespace pc {
     return outf;
   }
 
-  void meshSizeClamp(apf::Mesh2*& m, ph::Input& in, apf::Field* sizes) {
-    assert(sizes);
-    apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
-    apf::MeshEntity* v;
-    apf::MeshIterator* vit = m->begin(0);
-    while ((v = m->iterate(vit))) {
-      apf::getVector(sizes,v,0,v_mag);
-      for (int i = 0; i < 3; i++) {
-        if(v_mag[i] < in.simSizeLowerBound) v_mag[i] = in.simSizeLowerBound;
-        if(v_mag[i] > in.simSizeUpperBound) v_mag[i] = in.simSizeUpperBound;
-      }
-      apf::setVector(sizes,v,0,v_mag);
-    }
-    m->end(vit);
-  }
-
   void attachMeshSizeField(apf::Mesh2*& m, ph::Input& in) {
     /* create a field to store mesh size */
     if(m->findField("sizes")) apf::destroyField(m->findField("sizes"));
@@ -96,8 +82,6 @@ namespace pc {
 
     /* add mesh smooth/gradation function here */
     pc::addSmoother(m, in.gradingFactor);
-    /* limit mesh size in a range */
-    pc::meshSizeClamp(m, in, sizes);
   }
 
   int getNumOfMappedFields(phSolver::Input& inp) {
@@ -254,20 +238,163 @@ namespace pc {
     if(m->findField("frames")) apf::destroyField(m->findField("frames"));
   }
 
-  void scaleDownNumberElements(pMSAdapt adapter, ph::Input& in, apf::Mesh2*& m) {
-    int N_est = MSA_estimate(adapter);
+  void attachCurrentSizeField(apf::Mesh2*& m) {
+    int  nsd = m->getDimension();
+    if(m->findField("cur_size")) apf::destroyField(m->findField("cur_size"));
+    apf::Field* cur_size = apf::createField(m, "cur_size", apf::SCALAR, apf::getConstant(nsd));
+    // loop over non-BL elements
+    apf::MeshEntity* e;
+    apf::MeshIterator* eit = m->begin(nsd);
+    while ((e = m->iterate(eit))) {
+      pRegion meshRegion = reinterpret_cast<pRegion>(e);
+      if (EN_isBLEntity(meshRegion)) continue;
+      // set mesh size field
+      double h = 0.0;
+      if (m->getType(e) == apf::Mesh::TET)
+        h = apf::computeShortestHeightInTet(m,e) * sqrt(3.0);
+      else
+        h = pc::getShortestEdgeLength(m,e);
+      apf::setScalar(cur_size, e, 0, h);
+    }
+
+    // get sim model
+    apf::MeshSIM* sim_m = dynamic_cast<apf::MeshSIM*>(m);
+    pParMesh sim_pm = sim_m->getMesh();
+    pMesh pm = PM_mesh(sim_pm,0);
+
+    gmi_model* gmiModel = sim_m->getModel();
+    pGModel model = gmi_export_sim(gmiModel);
+
+    // loop over model faces
+    pGFace modelFace;
+    pFace meshFace;
+    pFace blFace;
+    pRegion blRegion;
+    FIter fIter;
+    pEntity seed;
+    pPList growthRegions = PList_new();
+    pPList growthFaces = PList_new();
+    GFIter gfIter = GM_faceIter(model);
+    while((modelFace=GFIter_next(gfIter))){
+      // loop over mesh faces on model face
+      fIter = M_classifiedFaceIter(pm, modelFace, 1);
+      while((meshFace = FIter_next(fIter))){
+        apf::MeshEntity* apf_f = reinterpret_cast<apf::MeshEntity*>(meshFace);
+        // check if BL base
+        if (BL_isBaseEntity(meshFace, modelFace)) {
+          // loop over BL regions and layers
+          for(int faceSide = 0; faceSide < 2; faceSide++){
+            int hasSeed = BL_stackSeedEntity(meshFace, modelFace, faceSide, NULL, &seed);
+            if (hasSeed) {
+              BL_growthRegionsAndLayerFaces((pRegion)seed, growthRegions, growthFaces, Layer_Entity);
+              if (PList_size(growthRegions) >= (PList_size(growthFaces)-1)*3) { // tet
+                for(int i = 0; i < PList_size(growthFaces); i++) {
+                  blFace = (pFace)PList_item(growthFaces,i);
+                  apf::MeshEntity* apf_f = reinterpret_cast<apf::MeshEntity*>(blFace);
+                  double h = apf::computeShortestHeightInTri(m,apf_f) * sqrt(2.0);
+                  for(int j = 0; j < 3; j++) {
+                    if (i*3+j == PList_size(growthRegions)) break;
+                    blRegion = (pRegion)PList_item(growthRegions,i*3+j);
+                    // set mesh size field
+                    apf::MeshEntity* apf_r = reinterpret_cast<apf::MeshEntity*>(blRegion);
+                    apf::setScalar(cur_size, apf_r, 0, h);
+                  }
+                }
+              }
+              else if (PList_size(growthRegions) >= (PList_size(growthFaces)-1)) { // wedge
+                for(int i = 0; i < PList_size(growthFaces); i++) {
+                  if (i == PList_size(growthRegions)) break;
+                  blFace = (pFace)PList_item(growthFaces,i);
+                  apf::MeshEntity* apf_f = reinterpret_cast<apf::MeshEntity*>(blFace);
+                  double h = apf::computeShortestHeightInTri(m,apf_f) * sqrt(2.0);
+                  blRegion = (pRegion)PList_item(growthRegions,i);
+                  // set mesh size field
+                  apf::MeshEntity* apf_r = reinterpret_cast<apf::MeshEntity*>(blRegion);
+                  apf::setScalar(cur_size, apf_r, 0, h);
+                }
+              }
+            }
+            else if (hasSeed < 0) {
+              printf("not support blending BL mesh or miss some info!\n");
+              exit(0);
+            }
+          }
+        }
+      }
+      FIter_delete(fIter);
+
+    }
+    GFIter_delete(gfIter);
+  }
+
+  int estimateAdaptedMeshElements(apf::Mesh2*& m, apf::Field* sizes) {
+    attachCurrentSizeField(m);
+    apf::Field* cur_size = m->findField("cur_size");
+    assert(cur_size);
+
+    double estElm = 0.0;
+    apf::Vector3 v_mag  = apf::Vector3(0.0, 0.0, 0.0);
+    int num_dims = m->getDimension();
+    assert(num_dims == 3); // only work for 3D mesh
+    apf::Vector3 xi = apf::Vector3(0.25, 0.25, 0);
+    apf::MeshEntity* en;
+    apf::MeshIterator* eit = m->begin(num_dims);
+    while ((en = m->iterate(eit))) {
+      apf::MeshElement* elm = apf::createMeshElement(m,en);
+      apf::Element* fd_elm = apf::createElement(sizes,elm);
+      apf::getVector(fd_elm,xi,v_mag);
+      double h_old = apf::getScalar(cur_size,en,0);
+      printf("h_old = %f; h_new = %f\n", h_old, v_mag[0]);
+      if(EN_isBLEntity(reinterpret_cast<pEntity>(en))) {
+        estElm = estElm + (h_old/v_mag[0])*(h_old/v_mag[0]);
+      }
+      else {
+        estElm = estElm + (h_old/v_mag[0])*(h_old/v_mag[0])*(h_old/v_mag[0]);
+      }
+    }
+    m->end(eit);
+
+    apf::destroyField(cur_size);
+
+    int estTolElm = PCU_Add_Int((int)estElm);
+    return estTolElm;
+  }
+
+  void scaleDownNumberElements(ph::Input& in, apf::Mesh2*& m, apf::Field* sizes) {
+    int N_est = estimateAdaptedMeshElements(m, sizes);
+    if(!PCU_Comm_Self())
+      printf("Estimated No. of Elm: %d\n", N_est);
     double f = (double)N_est / (double)in.simMaxAdaptMeshElements;
     if (f > 1.0) {
-      apf::Field* sizes = m->findField("sizes_sim");
-      assert(sizes);
+      core_driver_set_err_param(f);
+      apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
       apf::MeshEntity* v;
       apf::MeshIterator* vit = m->begin(0);
       while ((v = m->iterate(vit))) {
-        pVertex meshVertex = reinterpret_cast<pVertex>(v);
-        MSA_scaleVertexSize(adapter, meshVertex, f*f*f);
+        apf::getVector(sizes,v,0,v_mag);
+        for (int i = 0; i < 3; i++) v_mag[i] = v_mag[i] * cbrt(f);
+        apf::setVector(sizes,v,0,v_mag);
       }
       m->end(vit);
     }
+    else {
+      core_driver_set_err_param(1.0);
+    }
+  }
+
+  void meshSizeClamp(ph::Input& in, apf::Mesh2*& m, apf::Field* sizes) {
+    apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
+    apf::MeshEntity* v;
+    apf::MeshIterator* vit = m->begin(0);
+    while ((v = m->iterate(vit))) {
+      apf::getVector(sizes,v,0,v_mag);
+      for (int i = 0; i < 3; i++) {
+        if(v_mag[i] < in.simSizeLowerBound) v_mag[i] = in.simSizeLowerBound;
+        if(v_mag[i] > in.simSizeUpperBound) v_mag[i] = in.simSizeUpperBound;
+      }
+      apf::setVector(sizes,v,0,v_mag);
+    }
+    m->end(vit);
   }
 
   void setupSimImprover(pVolumeMeshImprover vmi, pPList sim_fld_lst) {
@@ -286,12 +413,18 @@ namespace pc {
     MSA_setBLSnapping(adapter, 0); // currently needed for parametric model
     MSA_setBLMinLayerAspectRatio(adapter, 0.0); // needed in parallel
 
+    apf::Field* sizes = m->findField("sizes_sim");
+    assert(sizes);
+    /* scale mesh if number of elements exceeds threshold */
+    pc::scaleDownNumberElements(in, m, sizes);
+
+    /* limit mesh size in a range */
+    pc::meshSizeClamp(in, m, sizes);
+
     /* use current size field */
     if(!PCU_Comm_Self())
       printf("Start mesh adapt of setting size field\n");
 
-    apf::Field* sizes = m->findField("sizes_sim");
-    assert(sizes);
     apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
     apf::MeshEntity* v;
     apf::MeshIterator* vit = m->begin(0);
@@ -302,9 +435,6 @@ namespace pc {
       MSA_setVertexSize(adapter, meshVertex, v_mag[0]);
     }
     m->end(vit);
-
-    /* scale mesh if number of elements exceeds threshold */
-    scaleDownNumberElements(adapter, in, m);
 
     /* set fields to be mapped */
     if (PList_size(sim_fld_lst))
