@@ -226,6 +226,28 @@ namespace pc {
     apf::destroyField(f_lq);
   }
 
+  void attachMinSizeFlagField(apf::Mesh2*& m, ph::Input& in) {
+    // create field
+    if(m->findField("hmin_flag")) apf::destroyField(m->findField("hmin_flag"));
+    apf::Field* rf = apf::createFieldOn(m, "hmin_flag", apf::SCALAR);
+    // loop over vertices
+    double size[1];
+    double anisosize[3][3];
+    apf::MeshEntity* v;
+    apf::MeshIterator* vit = m->begin(0);
+    while ((v = m->iterate(vit))) {
+      pVertex meshVertex = reinterpret_cast<pVertex>(v);
+      // request the size on it
+      V_size(meshVertex, size, anisosize);
+      // compare with the lower bound
+      if (size[0] <= in.simSizeLowerBound)
+        apf::setScalar(rf,v,0,1.0);
+      else
+        apf::setScalar(rf,v,0,0.0);
+    }
+    m->end(vit);
+  }
+
   void transferSimFields(apf::Mesh2*& m) {
     if (m->findField("pressure")) // assume we had solution before
       chef::combineField(m,"solution","pressure","velocity","temperature");
@@ -256,6 +278,7 @@ namespace pc {
         h = pc::getShortestEdgeLength(m,e);
       apf::setScalar(cur_size, e, 0, h);
     }
+    m->end(eit);
 
     // get sim model
     apf::MeshSIM* sim_m = dynamic_cast<apf::MeshSIM*>(m);
@@ -322,12 +345,11 @@ namespace pc {
         }
       }
       FIter_delete(fIter);
-
     }
     GFIter_delete(gfIter);
   }
 
-  int estimateAdaptedMeshElements(apf::Mesh2*& m, apf::Field* sizes) {
+  double estimateAdaptedMeshElements(apf::Mesh2*& m, apf::Field* sizes) {
     attachCurrentSizeField(m);
     apf::Field* cur_size = m->findField("cur_size");
     assert(cur_size);
@@ -355,15 +377,15 @@ namespace pc {
 
     apf::destroyField(cur_size);
 
-    int estTolElm = PCU_Add_Int((int)estElm);
-    return estTolElm;
+    long estTolElm = PCU_Add_Long((long)estElm);
+    return (double)estTolElm;
   }
 
   void scaleDownNumberElements(ph::Input& in, apf::Mesh2*& m, apf::Field* sizes) {
-    int N_est = estimateAdaptedMeshElements(m, sizes);
+    double N_est = estimateAdaptedMeshElements(m, sizes);
     if(!PCU_Comm_Self())
       printf("Estimated No. of Elm: %d\n", N_est);
-    double f = (double)N_est / (double)in.simMaxAdaptMeshElements;
+    double f = N_est / (double)in.simMaxAdaptMeshElements;
     if (f > 1.0) {
       core_driver_set_err_param(f);
       apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
@@ -509,6 +531,10 @@ namespace pc {
         printf("write mesh after mesh adaptation\n");
       writeSIMMesh(sim_pm, in.timeStepNumber, "sim_mesh_");
       Progress_delete(progress);
+
+      /* attach flag indicating reach minimum mesh size */
+      if (in.simSizeLowerBound > 0.0)
+        pc::attachMinSizeFlagField(m, in);
 
       /* transfer data back to apf */
       if (in.solutionMigration)
