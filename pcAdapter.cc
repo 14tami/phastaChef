@@ -408,6 +408,7 @@ namespace pc {
     apf::MeshEntity* v;
     apf::MeshIterator* vit = m->begin(0);
     while ((v = m->iterate(vit))) {
+      if(!vertexIsInCylinder(v)) continue;
       apf::getVector(sizes,v,0,v_mag);
       for (int i = 0; i < 3; i++) {
         if(v_mag[i] < low) v_mag[i] = low;
