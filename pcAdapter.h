@@ -13,6 +13,8 @@
 
 namespace pc {
 
+  bool vertexIsInCylinder(apf::MeshEntity* v);
+
   void attachMeshSizeField(apf::Mesh2*& m, ph::Input& in);
 
   int getNumOfMappedFields(phSolver::Input& inp);
