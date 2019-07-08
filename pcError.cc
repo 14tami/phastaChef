@@ -11,7 +11,6 @@
 #include <cassert>
 #include <phastaChef.h>
 #include "pcAdapter.h"
-#include "pcSmooth.h"
 
 namespace pc {
 
@@ -85,9 +84,7 @@ namespace pc {
       factor = desr_err[1] / sqrt(curr_err[1]*curr_err[1]
                                  +curr_err[2]*curr_err[2]
                                  +curr_err[3]*curr_err[3]);
-      if(!pc::isInCylinder(elm)) h_new = h_old;
-      else
-        h_new = h_old * pow(factor, 2.0/(2.0*(1.0+1.0-exp_m)+(double)nsd)) / sqrt(3.0);
+      h_new = h_old * pow(factor, 2.0/(2.0*(1.0+1.0-exp_m)+(double)nsd)) / sqrt(3.0);
       //set new size
       apf::setScalar(elm_size, elm, 0, h_new);
       apf::destroyMeshElement(me);
