@@ -13,7 +13,7 @@
 
 namespace pc {
 
-  void attachMeshSizeField(apf::Mesh2*& m, ph::Input& in);
+  void attachMeshSizeField(apf::Mesh2*& m, ph::Input& in, phSolver::Input& inp);
 
   int getNumOfMappedFields(phSolver::Input& inp);
 
@@ -23,8 +23,6 @@ namespace pc {
 
   pPList getSimFieldList(ph::Input& in, apf::Mesh2*& m);
 
-  void measureIsoMeshAndWrite(apf::Mesh2*& m, ph::Input& in);
-
   void attachMinSizeFlagField(apf::Mesh2*& m, ph::Input& in);
 
   void transferSimFields(apf::Mesh2*& m);
@@ -33,7 +31,7 @@ namespace pc {
 
   void setupSimImprover(pVolumeMeshImprover vmi, pPList sim_fld_lst);
 
-  void setupSimAdapter(pMSAdapt adapter, ph::Input& in, apf::Mesh2*& m, pPList sim_fld_lst);
+  void setupSimAdapter(pMSAdapt adapter, ph::Input& in, apf::Mesh2*& m, pPList& sim_fld_lst);
 
   void runMeshAdapter(ph::Input& in, apf::Mesh2*& m, apf::Field*& orgSF, int step);
 }

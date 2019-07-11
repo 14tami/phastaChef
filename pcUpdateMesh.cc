@@ -52,7 +52,7 @@ namespace pc {
     pc::setupSimImprover(vmi, sim_fld_lst);
   }
 
-  void addAdapterInMover(pMeshMover& mmover,  pPList sim_fld_lst, ph::Input& in, apf::Mesh2*& m) {
+  void addAdapterInMover(pMeshMover& mmover,  pPList& sim_fld_lst, ph::Input& in, apf::Mesh2*& m) {
     // mesh adapter
     if(!PCU_Comm_Self())
       printf("Add mesh adapter attributes\n");
@@ -604,16 +604,9 @@ if (pm) {
     pPList sim_fld_lst = PList_new();
     PList_clear(sim_fld_lst);
     if (cooperation) {
-      // attach mesh size field
-      pc::attachMeshSizeField(m, in);
-
-      if (in.solutionMigration)
-        sim_fld_lst = getSimFieldList(in, m);
-      addImproverInMover(mmover, sim_fld_lst);
       addAdapterInMover(mmover, sim_fld_lst, in, m);
+      addImproverInMover(mmover, sim_fld_lst);
     }
-    PList_clear(sim_fld_lst);
-    PList_delete(sim_fld_lst);
 
     // do real work
     if(!PCU_Comm_Self())
@@ -622,17 +615,12 @@ if (pm) {
     assert(isRunMover);
     MeshMover_delete(mmover);
 
+    PList_clear(sim_fld_lst);
+    PList_delete(sim_fld_lst);
+
     if (cooperation) {
       // load balance
       balanceEqualWeights(ppm, progress);
-
-      // write out mesh quality statistic info
-      if (in.measureAdaptedMesh)
-        pc::measureIsoMeshAndWrite(m, in);
-
-      // attach flag indicating reach minimum mesh size
-      if (in.simSizeLowerBound > 0.0)
-        pc::attachMinSizeFlagField(m, in);
 
       // transfer sim fields to apf fields
       if (in.solutionMigration)
