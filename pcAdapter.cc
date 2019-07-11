@@ -345,6 +345,7 @@ namespace pc {
     apf::Field* ct = apf::createSIMFieldOn(m, "tb_factor", apf::SCALAR);
     apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
     apf::NewArray<double> s(in.ensa_dof);
+    double maxCt = 1.0;
     apf::MeshEntity* v;
     apf::MeshIterator* vit = m->begin(0);
     while ((v = m->iterate(vit))) {
@@ -358,6 +359,7 @@ namespace pc {
       apf::setScalar(ct,v,0,1.0);
       for (int i = 0; i < 3; i++) {
         if(v_mag[i] < h_min) {
+          if(h_min/v_mag[i] > maxCt) maxCt = h_min/v_mag[i];
           apf::setScalar(ct,v,0,h_min/v_mag[i]);
           v_mag[i] = h_min;
         }
@@ -365,6 +367,10 @@ namespace pc {
       apf::setVector(sizes,v,0,v_mag);
     }
     m->end(vit);
+
+    double maxCtAll = PCU_Max_Double(maxCt);
+    if (!PCU_Comm_Self())
+      printf("max time resource bound factor: %f\n",maxCtAll);
   }
 
   void setupSimImprover(pVolumeMeshImprover vmi, pPList sim_fld_lst) {
