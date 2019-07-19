@@ -74,20 +74,18 @@ namespace pc {
       apf::Field* frames = apf::createSIMFieldOn(m, "frames", apf::MATRIX);
       ph::attachSIMSizeField(m, sizes, frames);
     }
-
 // prescribe mesh size field for the projectile case
 // this is hardcoded, please comment out this call for other usage
 //    pc::prescribe_proj_mesh_size(m, sizes, in.rbParamData[0]);
-
-    /* add mesh smooth/gradation function here */
-    pc::addSmoother(m, in.gradingFactor);
   }
 
-  int getNumOfMappedFields(phSolver::Input& inp) {
-    /* initially, we have 8 fields: pressure, velocity, temperature,
+  int getNumOfMappedFields(apf::Mesh2*& m) {
+    /* initially, we have 7 fields: pressure, velocity, temperature,
        time der of pressure, time der of velocity, time der of temperature,
-       ,mesh velocity and time resource bound factor field */
-    int numOfMappedFields = 8;
+       ,mesh velocity and 1 optional field: time resource bound factor field */
+    int numOfMappedFields;
+    if (m->findField("tb_factor")) numOfMappedFields = 8;
+    else numOfMappedFields = 7;
     return numOfMappedFields;
   }
 
@@ -150,7 +148,7 @@ namespace pc {
   pPList getSimFieldList(ph::Input& in, apf::Mesh2*& m){
     /* load input file for solver */
     phSolver::Input inp("solver.inp", "input.config");
-    int num_flds = getNumOfMappedFields(inp);
+    int num_flds = getNumOfMappedFields(m);
     removeOtherFields(m,inp);
     pField* sim_flds = new pField[num_flds];
     getSimFields(m, in.simmetrixMesh, sim_flds, inp);
@@ -406,6 +404,9 @@ namespace pc {
 
     /* scale mesh if reach time resource bound */
     pc::applyMaxTimeResource(m, sizes, in, inp);
+
+    /* add mesh smooth/gradation function here */
+    pc::addSmoother(m, in.gradingFactor);
 
     /* use current size field */
     if(!PCU_Comm_Self())
