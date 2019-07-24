@@ -423,6 +423,9 @@ namespace pc {
     }
     m->end(vit);
 
+    // additional writing to see mesh size before adaptation
+    pc::writeSequence(m, in.timeStepNumber, "error_mesh_size_");
+
     /* set fields to be mapped */
     PList_clear(sim_fld_lst);
     if (in.solutionMigration) {
