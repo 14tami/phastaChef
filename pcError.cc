@@ -122,7 +122,6 @@ namespace pc {
 
     //delete element-based error and mesh size
     apf::destroyField(cur_size);
-    apf::destroyField(err);
     apf::destroyField(elm_size);
   }
 
