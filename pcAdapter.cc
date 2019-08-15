@@ -403,6 +403,43 @@ namespace pc {
       printf("max time resource bound factor and min reached size: %f and %f\n",maxCtAll,minCtHAll);
   }
 
+// hardcoding mesh size for cylinder rotation {
+  void cylRotPrescribedMeshSize(apf::Mesh2* m, apf::Field* sizes,
+                                ph::Input& in, phSolver::Input& inp) {
+    double t = inp.GetValue("Time Step Size");
+    int step = in.timeStepNumber;
+    double rad = 36.0*t*(double)step/180.0*3.1415926;
+    double length = 24.0;
+    double radius = 1.5;
+    int cylTag1 = 206; // cylinder rotation case
+    int cylTag2 = 262; // cylinder rotation case
+    apf::ModelEntity* cme1 = m->findModelEntity(3, cylTag1);
+    apf::ModelEntity* cme2 = m->findModelEntity(3, cylTag2);
+    apf::Vector3 fine_size = apf::Vector3(0.1250,0.1250,0.1250);
+    apf::Vector3 face_size = apf::Vector3(0.0625,0.0625,0.0625);
+    apf::MeshEntity* v;
+    apf::MeshIterator* vit = m->begin(0);
+    while ((v = m->iterate(vit))) {
+      pVertex meshVertex = reinterpret_cast<pVertex>(v);
+      double xyz[3];
+      V_coord(meshVertex, xyz);
+      /* coordinate rotation */
+      double x =  xyz[0];
+      double y =  xyz[1]*cos(rad) + xyz[2]*sin(rad);
+      double z = -xyz[1]*sin(rad) + xyz[2]*cos(rad);
+      double r = sqrt(x*x + y*y);
+      if (r <= radius && fabs(z) <= length/2.0)
+        apf::setVector(sizes,v,0,fine_size);
+      apf::ModelEntity* me = m->toModel(v);
+      if (m->isInClosureOf(me, cme1))
+        apf::setVector(sizes,v,0,face_size);
+      if (m->isInClosureOf(me, cme2))
+        apf::setVector(sizes,v,0,face_size);
+    }
+    m->end(vit);
+  }
+// hardcoding mesh size for cylinder rotation }
+
   void setupSimImprover(pVolumeMeshImprover vmi, pPList sim_fld_lst) {
     VolumeMeshImprover_setModifyBL(vmi, 1);
     VolumeMeshImprover_setShapeMetric(vmi, ShapeMetricType_VolLenRatio, 0.3);
@@ -439,6 +476,10 @@ namespace pc {
 
     /* apply upper bound */
     pc::applyMaxSizeBound(m, sizes, in);
+
+// hardcoding for cylinder-rotation case only {
+    cylRotPrescribedMeshSize(m, sizes, in, inp);
+// hardcoding for cylinder-rotation case only }
 
     /* add mesh smooth/gradation function here */
     pc::addSmoother(m, in.gradingFactor);
