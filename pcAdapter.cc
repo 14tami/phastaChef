@@ -415,6 +415,7 @@ namespace pc {
     int cylTag2 = 262; // cylinder rotation case
     apf::ModelEntity* cme1 = m->findModelEntity(3, cylTag1);
     apf::ModelEntity* cme2 = m->findModelEntity(3, cylTag2);
+    apf::Vector3 cors_size = apf::Vector3(8.0000,8.0000,8.0000);
     apf::Vector3 fine_size = apf::Vector3(0.1250,0.1250,0.1250);
     apf::Vector3 face_size = apf::Vector3(0.0625,0.0625,0.0625);
     apf::MeshEntity* v;
@@ -428,13 +429,15 @@ namespace pc {
       double y =  xyz[1]*cos(rad) + xyz[2]*sin(rad);
       double z = -xyz[1]*sin(rad) + xyz[2]*cos(rad);
       double r = sqrt(x*x + y*y);
-      if (r <= radius && fabs(z) <= length/2.0)
-        apf::setVector(sizes,v,0,fine_size);
       apf::ModelEntity* me = m->toModel(v);
       if (m->isInClosureOf(me, cme1))
         apf::setVector(sizes,v,0,face_size);
-      if (m->isInClosureOf(me, cme2))
+      else if (m->isInClosureOf(me, cme2))
         apf::setVector(sizes,v,0,face_size);
+      else if (r <= radius && fabs(z) <= length/2.0)
+        apf::setVector(sizes,v,0,fine_size);
+      else
+        apf::setVector(sizes,v,0,cors_size);
     }
     m->end(vit);
   }
