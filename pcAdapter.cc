@@ -415,9 +415,9 @@ namespace pc {
     int cylTag2 = 262; // cylinder rotation case
     apf::ModelEntity* cme1 = m->findModelEntity(3, cylTag1);
     apf::ModelEntity* cme2 = m->findModelEntity(3, cylTag2);
-    apf::Vector3 cors_size = apf::Vector3(8.0000,8.0000,8.0000);
+    apf::Vector3 cors_size = apf::Vector3(in.simSizeUpperBound,in.simSizeUpperBound,in.simSizeUpperBound);
     apf::Vector3 fine_size = apf::Vector3(0.1250,0.1250,0.1250);
-    apf::Vector3 face_size = apf::Vector3(0.0625,0.0625,0.0625);
+    apf::Vector3 face_size = apf::Vector3(in.simSizeLowerBound,in.simSizeLowerBound,in.simSizeLowerBound);
     apf::MeshEntity* v;
     apf::MeshIterator* vit = m->begin(0);
     while ((v = m->iterate(vit))) {
