@@ -321,14 +321,21 @@ namespace pc {
   }
 
   void applyMaxSizeBound(apf::Mesh2*& m, apf::Field* sizes, ph::Input& in) {
+    int cylTag1 = 206; // cylinder rotation case
+    int cylTag2 = 262; // cylinder rotation case
+    apf::ModelEntity* cme1 = m->findModelEntity(3, cylTag1);
+    apf::ModelEntity* cme2 = m->findModelEntity(3, cylTag2);
     apf::Vector3 v_mag = apf::Vector3(0.0,0.0,0.0);
     apf::MeshEntity* v;
     apf::MeshIterator* vit = m->begin(0);
     while ((v = m->iterate(vit))) {
       apf::getVector(sizes,v,0,v_mag);
       for (int i = 0; i < 3; i++)
-        if(v_mag[i] > in.simSizeUpperBound)
-          v_mag[i] = in.simSizeUpperBound;
+        apf::ModelEntity* me = m->toModel(v);
+        if (m->isInClosureOf(me, cme1) && v_mag[i] > 0.0625) v_mag[i] = 0.0625;
+        if (m->isInClosureOf(me, cme2) && v_mag[i] > 0.0625) v_mag[i] = 0.0625;
+        if (v_mag[i] > in.simSizeUpperBound)
+            v_mag[i] = in.simSizeUpperBound;
       apf::setVector(sizes,v,0,v_mag);
     }
     m->end(vit);
@@ -479,7 +486,7 @@ namespace pc {
     pc::applyMaxSizeBound(m, sizes, in);
 
 // hardcoding for cylinder-rotation case only {
-    cylRotPrescribedMeshSize(m, sizes, in, inp);
+//    cylRotPrescribedMeshSize(m, sizes, in, inp);
 // hardcoding for cylinder-rotation case only }
 
     /* add mesh smooth/gradation function here */
