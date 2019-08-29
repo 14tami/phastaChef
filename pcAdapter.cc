@@ -330,12 +330,13 @@ namespace pc {
     apf::MeshIterator* vit = m->begin(0);
     while ((v = m->iterate(vit))) {
       apf::getVector(sizes,v,0,v_mag);
-      for (int i = 0; i < 3; i++)
+      for (int i = 0; i < 3; i++) {
         apf::ModelEntity* me = m->toModel(v);
         if (m->isInClosureOf(me, cme1) && v_mag[i] > 0.0625) v_mag[i] = 0.0625;
         if (m->isInClosureOf(me, cme2) && v_mag[i] > 0.0625) v_mag[i] = 0.0625;
         if (v_mag[i] > in.simSizeUpperBound)
             v_mag[i] = in.simSizeUpperBound;
+      }
       apf::setVector(sizes,v,0,v_mag);
     }
     m->end(vit);
